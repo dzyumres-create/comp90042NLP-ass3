@@ -20,7 +20,7 @@ At the same time, the raw original files are preserved untouched for the Transfo
 | File | What it is | Used by |
 |---|---|---|
 | `train-claims.json` | 1,228 labelled claims with `claim_text`, `claim_label`, and gold `evidences` IDs | Classification (training), oracle experiment |
-| `dev-claims.json` | ~300 labelled claims, same format as train | Everyone for evaluation |
+| `dev-claims.json` | ~300 labelled claims, same format as train | evaluation |
 | `test-claims-unlabelled.json` | Unlabelled claims, only `claim_text` | Final leaderboard submission |
 | `evidence.json` | 1.2M evidence passages, `{evidence_id: raw_text}` | Retrieval (Transformer reranker), classifier |
 | `dev-claims-baseline.json` | Example prediction output from a fake baseline | Reference only — shows the required output format for `eval.py` |
@@ -32,8 +32,8 @@ At the same time, the raw original files are preserved untouched for the Transfo
 
 These steps are applied **in order** to both claim texts and evidence passages:
 
-1. **Expand contractions** — *don't → do not*, *it's → it is*. Ensures BM25 sees full word forms rather than contracted tokens.
-2. **Lowercase** — *Antarctica → antarctica*. BM25 is case-sensitive so this prevents duplicate matching.
+1. **Expand contractions** — *don't → do not*, *it's → it is*. 
+2. **Lowercase** — *Antarctica → antarctica*. 
 3. **Remove punctuation and special characters** — replaces anything that is not a letter, number, or space with a space.
 4. **Tokenise** — splits the string into individual word tokens.
 5. **Remove stopwords** — removes common words (*the, is, at, a, an...*) that appear everywhere and carry no retrieval signal.
@@ -124,12 +124,16 @@ If it is close, the bottleneck is the **classifier itself**.
 | Train claims | *1228* |
 | Dev claims | *154* |
 | Evidence passages | *1208827* |
-| Mean claim length | *20.1* words |
+| Mean claim length | *20.1* a words |
 | Mean gold evidences per claim | *3.4* |
-| SUPPORTS (train) | *42.264%* |
-| REFUTES (train) | *16.205%* |
-| NOT_ENOUGH_INFO (train) | *31.433%* |
-| DISPUTED (train) | *10.097%* |
+| SUPPORTS (train) | *42.2%* |
+| REFUTES (train) | *16.2%* |
+| NOT_ENOUGH_INFO (train) | *31.4%* |
+| DISPUTED (train) | *10.1%* |
+| SUPPORTS (dev) | *44.2%* |
+| REFUTES (dev) | *17.5%* |
+| NOT_ENOUGH_INFO (dev) | *26.6%* |
+| DISPUTED (dev) | *11.7%* |
 
 > Most evidence passages fall in the 11–50 word range. There is also a large number of very short passages (≤5 words) which may pose challenges for retrieval.
 
