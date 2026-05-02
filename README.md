@@ -1,9 +1,9 @@
 # comp90042NLP-ass3
-# Preprocessing Handoff — COMP90042
+# Preprocessing
 
 ## What this document covers
 
-This document describes everything done in the preprocessing stage, what files were produced, and what each teammate should load for their component.
+This document describes everything done in the preprocessing stage, what files were produced, and which files should load.
 
 ---
 
@@ -15,14 +15,14 @@ At the same time, the raw original files are preserved untouched for the Transfo
 
 ---
 
-## Input files (raw, from the project)
+## Input files(raw files)
 
 | File | What it is | Used by |
 |---|---|---|
-| `train-claims.json` | 1,228 labelled claims with `claim_text`, `claim_label`, and gold `evidences` IDs | Classification teammate (training), oracle experiment |
+| `train-claims.json` | 1,228 labelled claims with `claim_text`, `claim_label`, and gold `evidences` IDs | Classification (training), oracle experiment |
 | `dev-claims.json` | ~300 labelled claims, same format as train | Everyone for evaluation |
 | `test-claims-unlabelled.json` | Unlabelled claims, only `claim_text` | Final leaderboard submission |
-| `evidence.json` | 1.2M evidence passages, `{evidence_id: raw_text}` | Retrieval teammate (Transformer reranker), classifier |
+| `evidence.json` | 1.2M evidence passages, `{evidence_id: raw_text}` | Retrieval (Transformer reranker), classifier |
 | `dev-claims-baseline.json` | Example prediction output from a fake baseline | Reference only — shows the required output format for `eval.py` |
 | `eval.py` | Evaluation script | Run this to get F-score, accuracy, and harmonic mean on dev |
 
@@ -50,20 +50,18 @@ These steps are applied **in order** to both claim texts and evidence passages:
 
 All saved to the `preprocessed/` folder.
 
-| File | What it contains | Format | Who loads it |
+| File | What it contains | Format | which parts load it |
 |---|---|---|---|
-| `train_clean.json` | All train claims with an added `clean_tokens` field (list of tokens) | Same as `train-claims.json` plus `clean_tokens` per entry | Retrieval teammate (BM25 stage) |
-| `dev_clean.json` | Same as above for dev claims | Same structure | Retrieval teammate (BM25 stage) |
-| `test_clean.json` | Same as above for test claims | Same structure | Retrieval teammate (BM25 stage) |
-| `evidence_clean.json` | All 1.2M evidence passages cleaned into token lists | `{evidence_id: [token, token, ...]}` | Retrieval teammate (BM25 stage only) |
+| `train_clean.json` | All train claims with an added `clean_tokens` field (list of tokens) | Same as `train-claims.json` plus `clean_tokens` per entry | Retrieval (BM25 stage) |
+| `dev_clean.json` | Same as above for dev claims | Same structure | Retrieval (BM25 stage) |
+| `test_clean.json` | Same as above for test claims | Same structure | Retrieval (BM25 stage) |
+| `evidence_clean.json` | All 1.2M evidence passages cleaned into token lists | `{evidence_id: [token, token, ...]}` | Retrieval (BM25 stage only) |
 | `stats_summary.json` | Key dataset statistics | JSON dict | Reference for report writing |
 | `class_distribution.png` | Bar chart of label counts in train and dev | Image | Report Section 2 figure |
 
 ---
 
-## What each teammate should load
-
-### Retrieval teammate
+### Retrieval
 
 #### BM25 first stage
 
@@ -100,25 +98,8 @@ with open('data/evidence.json', 'r') as f:
 
 ---
 
-### Classification teammate
+### Classification 
 
-Load the original `train-claims.json` and `dev-claims.json` directly — raw text, your model's tokenizer handles it. Use the gold `evidences` IDs during training to look up the actual passage text from `evidence.json`.
-
-```python
-import json
-
-with open('data/train-claims.json', 'r') as f:
-    train_claims = json.load(f)
-
-with open('data/evidence.json', 'r') as f:
-    evidence = json.load(f)
-
-# For a given claim, get its gold evidence texts:
-entry = train_claims['claim-2967']
-gold_texts = [evidence[eid] for eid in entry['evidences']]
-```
-
-> **Important:** Train on gold evidence from `train-claims.json`. At inference time you will receive retrieved evidence IDs from the retrieval teammate instead. The gap between these two is worth discussing in the report.
 
 ---
 
@@ -128,31 +109,29 @@ The oracle experiment trains a simple logistic regression classifier on gold evi
 
 | Experiment | Dev Accuracy |
 |---|---|
-| Oracle (gold evidence + logistic regression) | *(fill in your number after running Cell 9)* |
+| Oracle (gold evidence + logistic regression) | *Oracle accuracy (gold evidence → dev): 0.5000* |
 
 If the final system's accuracy is far below this, the bottleneck is **retrieval quality**.  
 If it is close, the bottleneck is the **classifier itself**.  
-Share this number with both teammates.
 
 ---
 
 ## Key statistics for the report
 
-Fill these in from `stats_summary.json` after running the notebook:
 
 | Statistic | Value |
 |---|---|
-| Train claims | *(number)* |
-| Dev claims | *(number)* |
-| Evidence passages | *(number)* |
-| Mean claim length | *(number)* words |
-| Mean gold evidences per claim | *(number)* |
-| SUPPORTS (train) | *(%)* |
-| REFUTES (train) | *(%)* |
-| NOT_ENOUGH_INFO (train) | *(%)* |
-| DISPUTED (train) | *(%)* |
+| Train claims | *1228* |
+| Dev claims | *154* |
+| Evidence passages | *1208827* |
+| Mean claim length | *20.1* words |
+| Mean gold evidences per claim | *3.4* |
+| SUPPORTS (train) | *42.264%* |
+| REFUTES (train) | *16.205%* |
+| NOT_ENOUGH_INFO (train) | *31.433%* |
+| DISPUTED (train) | *10.097%* |
 
-> Most evidence passages fall in the 11–50 word range. There is also a large number of very short passages (≤5 words) which may pose challenges for retrieval — the retrieval teammate should be aware of this.
+> Most evidence passages fall in the 11–50 word range. There is also a large number of very short passages (≤5 words) which may pose challenges for retrieval.
 
 ---
 
