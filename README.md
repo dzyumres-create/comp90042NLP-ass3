@@ -1,5 +1,8 @@
 # comp90042NLP-ass3
-# Structure of Report (if you want to write some parts, don't forget the number. for example: **3.1** Data Analysis ):
+
+## Structure of Report (if you want to write some parts, don't forget the number. for example: **3.1** Data Analysis ):
+
+## Structure
 1. Abstract 
 2. Introduction 
 3. Approach (our whole system process without analysis)
