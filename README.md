@@ -1,5 +1,58 @@
 # comp90042NLP-ass3
-# Preprocessing
+# Structure of Report (if you want to write some parts, don't forget the number. for example: **3.1** Data Analysis ):
+1. Abstract 
+2. Introduction 
+3. Approach (our whole system process without analysis)
+
+Please attach the pictures and tables to make content more vivid. 
+
+3.1 Data Analysis — label distribution, class imbalance, evidence length 
+3.2 Preprocessing — lemmatisation, why it matters for BM25
+3.3 Evidence Retrieval — BM25, grid search, why recall over F1 , hyper parameter tradeoff
+3.4 Evidence Reranking — cross-encoder, domain mismatch, fine-tuning rationale 
+3.5 Claim Classification — BERT, [EVID_SEP], noise training C1, class weights C2 
+3.6 Alternative approaches considered — bi-encoder considered and rejected, why 
+
+4. Experiments
+
+4.1 Experimental setup — dataset stats, hardware, hyperparameters for all models (Teammate B for classifier, You for reranker, Teammate A for BM25)
+4.2 Evaluation metrics — F, A, H_FA definitions 
+
+5. Results
+
+5.1 Main ablation table — every configuration row 
+5.2 Retrieval analysis — BM25 recall at different top-k 
+5.3 Pipeline improvement analysis — what each component added 
+5.4 Novelty experiments — PL1 ensemble sweep table + N1 abstention table + analysis of why both failed 
+
+6. Conclusion 
+7. Team Contributions 
+8. References 
+
+# 3.1 data Analysis
+
+## Key statistics for the report
+
+| Statistic | Value |
+|---|---|
+| Train claims | *1228* |
+| Dev claims | *154* |
+| Evidence passages | *1208827* |
+| Mean claim length | *20.1* a words |
+| Mean gold evidences per claim | *3.4* |
+| SUPPORTS (train) | *42.2%* |
+| REFUTES (train) | *16.2%* |
+| NOT_ENOUGH_INFO (train) | *31.4%* |
+| DISPUTED (train) | *10.1%* |
+| SUPPORTS (dev) | *44.2%* |
+| REFUTES (dev) | *17.5%* |
+| NOT_ENOUGH_INFO (dev) | *26.6%* |
+| DISPUTED (dev) | *11.7%* |
+
+> Most evidence passages fall in the 11–50 word range. There is also a large number of very short passages (≤5 words) which may pose challenges for retrieval.
+
+
+# 3.2 Preprocessing
 
 ## What this document covers
 
@@ -103,46 +156,9 @@ with open('data/evidence.json', 'r') as f:
 
 ---
 
-## Oracle experiment result
 
-The oracle experiment trains a simple logistic regression classifier on gold evidence and evaluates on dev. This number represents the **upper bound** on classification accuracy — what the system could achieve if retrieval were perfect.
-
-| Experiment | Dev Accuracy |
-|---|---|
-| Oracle (gold evidence + logistic regression) | *Oracle accuracy (gold evidence → dev): 0.5000* |
-
-If the final system's accuracy is far below this, the bottleneck is **retrieval quality**.  
-If it is close, the bottleneck is the **classifier itself**.  
 
 ---
 
-## Key statistics for the report
-
-
-| Statistic | Value |
-|---|---|
-| Train claims | *1228* |
-| Dev claims | *154* |
-| Evidence passages | *1208827* |
-| Mean claim length | *20.1* a words |
-| Mean gold evidences per claim | *3.4* |
-| SUPPORTS (train) | *42.2%* |
-| REFUTES (train) | *16.2%* |
-| NOT_ENOUGH_INFO (train) | *31.4%* |
-| DISPUTED (train) | *10.1%* |
-| SUPPORTS (dev) | *44.2%* |
-| REFUTES (dev) | *17.5%* |
-| NOT_ENOUGH_INFO (dev) | *26.6%* |
-| DISPUTED (dev) | *11.7%* |
-
-> Most evidence passages fall in the 11–50 word range. There is also a large number of very short passages (≤5 words) which may pose challenges for retrieval.
-
----
-
-## One thing to be aware of
-
-Colab's local storage resets when the session ends. Download the preprocessed files and store them somewhere persistent (Google Drive or your own machine) after running the notebook.
-
-**Do not re-run the evidence cleaning cell unnecessarily** — it processes 1.2M passages and takes several minutes.
 
    
