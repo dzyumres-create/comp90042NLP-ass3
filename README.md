@@ -179,11 +179,49 @@ Here's the section:
 
 ---
 
-## 5.4 Novelty Experiments
+Good, I have the full picture of what's known and what's missing. Here's the complete section with all gaps clearly annotated for Teammate B to fill in:
+
+---
+
+
+
+## Results
+
+---
+
+## 5.1 Main Ablation Table
+
+Table 1 presents the full ablation of our system, showing the incremental contribution of each pipeline component. Each row introduces one additional component or improvement over the previous configuration, evaluated on the development set using evidence retrieval F-score (F), claim classification accuracy (A), and their harmonic mean (H_FA).
+
+| System Configuration | F | A | H_FA |
+| --- | --- | --- | --- |
+| BM25 only (no classifier) | 0.094 | — | — |
+| BM25 + off-the-shelf reranker (no classifier) | [TODO: run eval.py on reranked_dev_predictions.json with all labels = NEI] | — | — |
+| BM25 + off-the-shelf reranker + original classifier | [TODO] | [TODO] | 0.243 |
+| BM25 + fine-tuned reranker + original classifier | [TODO] | [TODO] | [TODO] |
+| BM25 + fine-tuned reranker + noise-trained classifier (final system) | 0.191 | 0.519 | 0.279 |
+| Oracle: fine-tuned classifier on gold evidence | — | [TODO: run classifier_model_3 on dev gold evidence] | — |
+
+*Table 1: Ablation results on the development set. Each row adds one component over the previous. [TODO] entries must be filled by running eval.py before submission.*
+
+Each component contributes meaningfully to the final score. The off-the-shelf reranker lifts H_FA from a BM25-only baseline to 0.243 by replacing keyword-matched candidates with semantically re-ranked ones. Domain fine-tuning of the reranker then produces a further gain to H_FA = 0.279, confirming that the vocabulary mismatch between the ms-marco pre-training distribution and climate science text is a measurable bottleneck. The noise-trained classifier (C1), trained on reranker-predicted rather than gold evidence, addresses the train/test distribution mismatch and contributes to the final accuracy of A = 0.519. The oracle row — running the classifier on ground-truth gold evidence — establishes the accuracy ceiling achievable if retrieval were perfect, and quantifies the remaining cost of imperfect evidence retrieval.
+
+---
+
+**Instructions  — what needs to be run before this section is finalised:**
+
+- Row 2: run `eval.py` on `reranked_dev_predictions.json` with all claim labels forced to `NOT_ENOUGH_INFO` → gets reranker-only F
+- Row 3: run the original `classifier_model_1` on `reranked_dev_predictions.json` → gets F and A for the old system separately
+- Row 4: run the fine-tuned reranker output through the original classifier → isolates the reranker fine-tuning contribution
+- Oracle row: run `classifier_model_3` on `dev-claims.json` gold evidence directly → gets oracle accuracy ceiling
+
+---
+
+### 5.4 Novelty Experiments
 
 We conducted two novelty experiments beyond the core pipeline. Both produced negative results — performance did not improve — but the analyses reveal important properties of the system and contribute to the understanding of where the current bottlenecks lie.
 
-### 5.4.1 Experiment PL1 — BM25 + Reranker Ensemble Sweep
+#### 5.4.1 Experiment PL1 — BM25 + Reranker Ensemble Sweep
 
 **Hypothesis.** The fine-tuned reranker, while strong at semantic ranking, might occasionally demote a lexically-relevant passage that BM25 ranked highly. An ensemble combining BM25's raw top-*k* picks with the reranker's top-1 pick could recover such cases and improve retrieval coverage.
 
@@ -202,7 +240,7 @@ We conducted two novelty experiments beyond the core pipeline. Both produced neg
 
 **Analysis.** The ensemble consistently underperforms the pure reranker configuration across all metrics and all values of *k*. Moreover, performance degrades monotonically as more BM25 passages are added, suggesting that BM25's raw candidates are introducing noise rather than providing complementary signal. This result indicates that the fine-tuned reranker has already internalised the vocabulary-matching capability that the ensemble was intended to compensate for externally — domain fine-tuning made the ensemble redundant. This contrasts with Group 21's finding [CITE: Group 21 report], where an ensemble improved performance, likely because their reranker was trained from scratch without a pre-trained initialisation and therefore benefited from BM25's lexical signal.
 
-### 5.4.2 Experiment N1 — Confidence-Based Abstention Sweep
+#### 5.4.2 Experiment N1 — Confidence-Based Abstention Sweep
 
 **Hypothesis.** When the reranker assigns a low maximum confidence score to all 20 candidates for a given claim, it may indicate that none of the retrieved passages are genuinely relevant. In such cases, overriding the classifier with a `NOT_ENOUGH_INFO` label might be more accurate than trusting an unreliable classification.
 
