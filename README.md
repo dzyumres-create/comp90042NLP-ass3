@@ -120,16 +120,27 @@ with open('preprocessed/train_clean.json', 'r') as f:
 # train_clean['claim-2967']['clean_tokens'] → ['south', 'australia', 'expens', ...]
 ```
 
-#### Transformer reranker
+# 3.4 Evidence Reranking
 
-Load the original `evidence.json` directly — raw text, no preprocessing needed. The model's own tokenizer handles everything.
+## 3.4.1 Model Choice: Cross-Encoder
+Given the top-20 candidate passages returned by BM25, the reranking stage re-scores each candidate against the claim and selects the top-3 for downstream classification. We use a cross-encoder architecture based on cross-encoder/ms-marco-MiniLM-L-6-v2 [CITE: Reimers & Gurevych, 2019].
+A cross-encoder processes a claim-evidence pair by concatenating the two texts with a [SEP] separator and passing the full sequence through a transformer encoder:
+            **score(claim, evidence) = sigmoid( Transformer( "claim text [SEP] evidence text" ) )**
+This joint encoding allows every attention head in the transformer to attend across both texts simultaneously, capturing semantic relationships that surface-form matching cannot — for example, recognising that "carbon dioxide" and "CO₂" refer to the same entity, or that a passage discussing "anthropogenic warming" is relevant to a claim about "human-caused climate change".
+This is in contrast to a bi-encoder, which encodes the claim and each evidence passage independently and computes similarity via dot product or cosine distance. While bi-encoders are faster at inference, they cannot model cross-text interactions, which makes them poorly suited to a task where relevance depends on nuanced semantic alignment between a scientific claim and a passage (see Section 3.6 for further discussion of this design decision).
+## 3.4.2 Domain Mismatch and the Motivation for Fine-Tuning
+The ms-marco model was pre-trained on the Microsoft MARCO dataset — a large collection of web search queries and web page passages. Climate science claims are structurally and semantically different from web search queries in several important ways: they are longer and more complex, they assert specific scientific propositions, and they rely on specialised vocabulary that does not appear in web corpora. Terms such as radiative forcing, equilibrium climate sensitivity, and paleoclimate proxy are routine in our evidence corpus but absent from the pre-training distribution.
+As a result, using the ms-marco model in a zero-shot setting introduces a domain mismatch: the model may rank evidence passages that share common surface-level words with the claim above passages that are scientifically more relevant. The off-the-shelf reranker achieved H_FA = 0.243 on the development set, which, while an improvement over BM25 alone, leaves significant headroom.
+3.4.3 Fine-Tuning Procedure
+To adapt the reranker to the climate domain, we fine-tuned it on claim-evidence pairs constructed from the training set. The training data was built as follows:
 
-```python
-with open('data/evidence.json', 'r') as f:
-    evidence_raw = json.load(f)
+**Positive pairs**: each gold evidence passage linked to a claim in train-claims.json was paired with that claim and labelled 1.
+**Negative pairs**: the remaining passages from BM25's top-20 candidates for that claim (those not in the gold evidence set) were labelled 0. To control the class imbalance, a maximum negative-to-positive ratio of 5:1 was enforced, with negatives sampled randomly when the ratio would otherwise be exceeded.
 
-# evidence_raw['evidence-0'] → 'John Bennet Lawes, English entrepreneur...'
-```
+This construction strategy uses hard negatives — passages that BM25 considered plausible but that are not truly relevant. Hard negatives are more informative for training than randomly sampled passages, because they force the model to learn fine-grained distinctions rather than trivial ones. The model was fine-tuned for 3 epochs with a batch size of 16, using a warmup of 10% of total training steps. The fine-tuned weights were saved and used for all subsequent reranking in the pipeline.
+## 3.4.4 Effect of Fine-Tuning
+Fine-tuning produced a meaningful improvement across all metrics on the development set. H_FA increased from 0.243 (off-the-shelf) to 0.279 (fine-tuned), a relative gain of approximately 15%. This confirms that domain adaptation is effective even with a relatively small training set (1,228 claims), and that the vocabulary and structural differences between web search and climate science are large enough to warrant explicit adaptation.
+The value of fine-tuning is further demonstrated by the negative result from our ensemble experiment (Section 5.4): adding BM25's raw top-k passages alongside the reranker's output did not improve performance, suggesting that the fine-tuned reranker had already internalised the lexical matching capabilities that the ensemble was intended to supplement.
 
 ---
 
@@ -141,6 +152,10 @@ with open('data/evidence.json', 'r') as f:
 
 
 ---
+# Reference
 
+[CITE: Reimers & Gurevych, 2019] — the sentence-transformers / cross-encoder paper
+[CITE: Nogueira & Cho, 2019] — ms-marco model
+[CITE: Nguyen et al., 2016] — the Microsoft MARCO dataset itself
 
    
