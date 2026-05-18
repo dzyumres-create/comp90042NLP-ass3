@@ -36,6 +36,19 @@ Please attach the pictures and tables to make content more vivid.
 
 ## Key statistics for the report
 
+## Input files(raw files)
+
+| File | What it is | Used by |
+|---|---|---|
+| `train-claims.json` | 1,228 labelled claims with `claim_text`, `claim_label`, and gold `evidences` IDs | Classification (training), oracle experiment |
+| `dev-claims.json` | ~300 labelled claims, same format as train | evaluation |
+| `test-claims-unlabelled.json` | Unlabelled claims, only `claim_text` | Final leaderboard submission |
+| `evidence.json` | 1.2M evidence passages, `{evidence_id: raw_text}` | Retrieval (Transformer reranker), classifier |
+| `dev-claims-baseline.json` | Example prediction output from a fake baseline | Reference only — shows the required output format for `eval.py` |
+| `eval.py` | Evaluation script | Run this to get F-score, accuracy, and harmonic mean on dev |
+
+---
+
 | Statistic | Value |
 |---|---|
 | Train claims | *1228* |
@@ -57,49 +70,15 @@ Please attach the pictures and tables to make content more vivid.
 
 # 3.2 Preprocessing
 
-## What this document covers
+Before retrieval, all claim texts and evidence passages are passed through a shared preprocessing pipeline implemented in the clean_text() function. The same function is applied uniformly to both claims and the full evidence corpus of 1,208,827 passages, ensuring that the vocabulary space seen during retrieval is consistent between query and document representations.
+The pipeline applies the following steps in order:
 
-This document describes everything done in the preprocessing stage, what files were produced, and which files should load.
-
----
-
-## What preprocessing does and why
-
-The raw data files cannot be fed directly into BM25 retrieval — they contain contractions, punctuation, stopwords, and mixed casing that hurt keyword matching. Preprocessing cleans the text into a consistent format for BM25.
-
-At the same time, the raw original files are preserved untouched for the Transformer reranker and classifier, which handle their own tokenisation internally.
-
----
-
-## Input files(raw files)
-
-| File | What it is | Used by |
-|---|---|---|
-| `train-claims.json` | 1,228 labelled claims with `claim_text`, `claim_label`, and gold `evidences` IDs | Classification (training), oracle experiment |
-| `dev-claims.json` | ~300 labelled claims, same format as train | evaluation |
-| `test-claims-unlabelled.json` | Unlabelled claims, only `claim_text` | Final leaderboard submission |
-| `evidence.json` | 1.2M evidence passages, `{evidence_id: raw_text}` | Retrieval (Transformer reranker), classifier |
-| `dev-claims-baseline.json` | Example prediction output from a fake baseline | Reference only — shows the required output format for `eval.py` |
-| `eval.py` | Evaluation script | Run this to get F-score, accuracy, and harmonic mean on dev |
-
----
-
-## Cleaning steps applied
-
-These steps are applied **in order** to both claim texts and evidence passages:
-
-1. **Expand contractions** — *don't → do not*, *it's → it is*. 
-2. **Lowercase** — *Antarctica → antarctica*. 
-3. **Remove punctuation and special characters** — replaces anything that is not a letter, number, or space with a space.
-4. **Tokenise** — splits the string into individual word tokens.
-5. **Remove stopwords** — removes common words (*the, is, at, a, an...*) that appear everywhere and carry no retrieval signal.
-6. **Remove single-character tokens** — removes leftover noise like lone letters or digits.
-7. **Output is a list of tokens** — not a string. This is the format `rank_bm25` expects directly.
-
-> **Note:** Stemming was deliberately skipped. BM25 handles term frequency internally and stemming can merge words that should stay distinct.
-
-> **Note:** The `contractions` library crashes on very short or unusual strings in the evidence corpus. The cleaning function wraps that step in a `try/except` so it skips gracefully without stopping the pipeline.
-
+1. **Contraction expansion** Contractions such as isn't and it's are expanded to their full forms using the contractions library, preventing the same word from appearing as two different tokens depending on whether it was contracted.
+2. **Lowercasing**  All text is converted to lowercase to eliminate case-based token mismatches (e.g., CO2 and co2 being treated as distinct terms).
+3. **Punctuation and special character removal** All non-alphanumeric characters are replaced with spaces using a regular expression, removing symbols, hyphens, and citation artefacts common in scientific text.
+4. **Tokenisation** Tokens are produced using NLTK's word_tokenize.
+5. **Stopword removal** Standard English stopwords from NLTK's stopword list are removed, along with any single-character tokens, to reduce noise and index size.
+6. **POS-aware** lemmatisation. Each remaining token is part-of-speech tagged using NLTK's averaged perceptron tagger, and the tag is mapped to WordNet's four-category POS scheme (noun, verb, adjective, adverb). The WordNetLemmatizer then reduces each token to its base form using the correct POS context — for example, warming is correctly lemmatised to warm (verb) rather than warming (noun). This is an improvement over stemming, which can produce non-words, and over POS-agnostic lemmatisation, which defaults all tokens to the noun category and produces incorrect results for verbs and adjectives.
 ---
 
 ## Output files (preprocessed, ready to load)
