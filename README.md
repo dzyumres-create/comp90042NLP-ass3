@@ -176,13 +176,7 @@ We conducted two novelty experiments beyond the core pipeline. Both produced neg
 Hypothesis. The fine-tuned reranker, while strong at semantic ranking, might occasionally demote a lexically-relevant passage that BM25 ranked highly. An ensemble combining BM25's raw top-k picks with the reranker's top-1 pick could recover such cases and improve retrieval coverage.
 Setup. We fixed the reranker's top-1 evidence passage and supplemented it with BM25's top-k raw candidates (k = 1, 2, 3), producing evidence sets of size 2, 3, and 4 respectively. Each configuration was passed to the classifier and evaluated on the development set.
 Results.
-
-|Configuration | F | A | H_FA |
-| -------- | -------- | -------- | -------- |
-| BM25 top-1 + reranker top-1    | 0.181     | 0.506     | 0.26     |
-| BM25 top-2 + reranker top-1    | 0.173     | 0.506     | 0.258    |
-| BM25 top-3 + reranker top-1    | 0.166     | 0.500     | 0.249     |
-| Pure reranker top-3 (final system)    | 0.191     | 0.519     | 0.279     |
+ConfigurationFAH_FABM25 top-1 + reranker top-10.1810.5060.266BM25 top-2 + reranker top-10.1730.5060.258BM25 top-3 + reranker top-10.1660.5000.249Pure reranker top-3 (final system)0.1910.5190.279
 Table 2: Ensemble sweep results on the development set. Pure reranker top-3 dominates across all metrics.
 Analysis. The ensemble consistently underperforms the pure reranker configuration across all metrics and all values of k. Moreover, performance degrades monotonically as more BM25 passages are added, suggesting that BM25's raw candidates are introducing noise rather than providing complementary signal. This result indicates that the fine-tuned reranker has already internalised the vocabulary-matching capability that the ensemble was intended to compensate for externally — domain fine-tuning made the ensemble redundant. This contrasts with Group 21's finding [CITE: Group 21 report], where an ensemble improved performance, likely because their reranker was trained from scratch without a pre-trained initialisation and therefore benefited from BM25's lexical signal.
 5.4.2 Experiment N1 — Confidence-Based Abstention Sweep
