@@ -131,11 +131,12 @@ This is in contrast to a bi-encoder, which encodes the claim and each evidence p
 ## 3.4.2 Domain Mismatch and the Motivation for Fine-Tuning
 The ms-marco model was pre-trained on the Microsoft MARCO dataset — a large collection of web search queries and web page passages. Climate science claims are structurally and semantically different from web search queries in several important ways: they are longer and more complex, they assert specific scientific propositions, and they rely on specialised vocabulary that does not appear in web corpora. Terms such as radiative forcing, equilibrium climate sensitivity, and paleoclimate proxy are routine in our evidence corpus but absent from the pre-training distribution.
 As a result, using the ms-marco model in a zero-shot setting introduces a domain mismatch: the model may rank evidence passages that share common surface-level words with the claim above passages that are scientifically more relevant. The off-the-shelf reranker achieved H_FA = 0.243 on the development set, which, while an improvement over BM25 alone, leaves significant headroom.
-3.4.3 Fine-Tuning Procedure
+## 3.4.3 Fine-Tuning Procedure
 To adapt the reranker to the climate domain, we fine-tuned it on claim-evidence pairs constructed from the training set. The training data was built as follows:
 
 **Positive pairs**: each gold evidence passage linked to a claim in train-claims.json was paired with that claim and labelled 1.
-**Negative pairs**: the remaining passages from BM25's top-20 candidates for that claim (those not in the gold evidence set) were labelled 0. To control the class imbalance, a maximum negative-to-positive ratio of 5:1 was enforced, with negatives sampled randomly when the ratio would otherwise be exceeded.
+**Negative pairs**: the remaining passages from BM25's top-20 candidates for that claim (those not in the gold evidence set) were labelled 0. 
+To control the class imbalance, a maximum negative-to-positive ratio of 5:1 was enforced, with negatives sampled randomly when the ratio would otherwise be exceeded.
 
 This construction strategy uses hard negatives — passages that BM25 considered plausible but that are not truly relevant. Hard negatives are more informative for training than randomly sampled passages, because they force the model to learn fine-grained distinctions rather than trivial ones. The model was fine-tuned for 3 epochs with a batch size of 16, using a warmup of 10% of total training steps. The fine-tuned weights were saved and used for all subsequent reranking in the pipeline.
 ## 3.4.4 Effect of Fine-Tuning
@@ -144,14 +145,59 @@ The value of fine-tuning is further demonstrated by the negative result from our
 
 ---
 
-### Classification 
+# 3.6 Alternative Approaches Considered
+
+## 3.6.1 Bi-Encoder for Reranking
+Before adopting the cross-encoder, we considered a bi-encoder for reranking, which encodes the claim and each evidence passage independently and computes relevance via cosine similarity between the two resulting vectors. While bi-encoders offer inference speed advantages at scale, this is irrelevant at our reranking stage where only 20 candidates need scoring. More critically, independent encoding prevents the model from capturing cross-text semantic interactions — the kind of joint reasoning required to determine whether a passage is genuinely relevant to a specific scientific claim, rather than merely sharing surface vocabulary. The cross-encoder was therefore preferred.
+## 3.6.2 Dense Retrieval as a BM25 Replacement
+We also considered replacing BM25 with a dense retrieval model such as DPR [CITE: Karpukhin et al., 2020] for initial candidate generation. This was rejected on practical grounds: encoding and indexing 1,208,827 passages into a dense vector index exceeded our available GPU resources. Given that BM25 at top-20 already achieves a recall of approximately 0.36 on the development set, the cost-benefit case for dense retrieval was not compelling.
+
+---
+
+# Classification 
 
 
 ---
 
+# 5.3 Pipeline Improvement Analysis
+
+Figure 1 shows the full four-stage architecture of our system. Each stage builds on the previous, and the contribution of each component can be quantified by comparing performance before and after its introduction.
+***Stage 1 — Preprocessing establishes*** a consistent token vocabulary across claims and the 1,208,827-passage evidence corpus. By applying contraction expansion, lowercasing, stopword removal, and POS-aware lemmatisation, the pipeline reduces vocabulary mismatch that would otherwise penalise BM25 term overlap. The impact of this stage is embedded in all downstream scores and cannot be isolated without a controlled ablation, but it is a necessary foundation for the retrieval recall figures reported below.
+***Stage 2 — BM25 Retrieval*** achieves a recall of approximately 0.36 at top-20 on the development set. This is the ceiling that the reranker and classifier must work within — any gold evidence passage not retrieved at this stage is unrecoverable. The grid-searched hyperparameters (k1, b) were optimised specifically for recall rather than F-score, reflecting the asymmetric cost of missed evidence versus extra candidates.
+***Stage 3 — Cross-encoder Reranking*** is where the most significant improvement occurs. The off-the-shelf ms-marco reranker brought H_FA to 0.243. After fine-tuning on climate claim-evidence pairs, H_FA improved to 0.279 — a 15% relative gain. This confirms that domain adaptation is the primary driver of reranking quality, and that the vocabulary mismatch between web search pre-training and climate science text is large enough to be a measurable bottleneck.
+***Stage 4 — BERT Classification*** achieves a classification accuracy of A = 0.519 on the development set, with F = 0.191 (retrieval F-score is fixed by the reranker at this point). The key design choice here — training on reranker-predicted evidence rather than gold evidence — addresses the train/test distribution mismatch that would otherwise cause the classifier to overfit to clean, perfectly-retrieved inputs it will never see at inference time. The final H_FA of 0.279 represents the combined effect of all four stages working together.
+Figure 1: System architecture of the climate fact-checking pipeline. Metrics shown on the right reflect development set performance at each stage.
+
+---
+
+# 5.4 Novelty Experiments
+We conducted two novelty experiments beyond the core pipeline. Both produced negative results — performance did not improve — but the analyses reveal important properties of the system and contribute to the understanding of where the current bottlenecks lie.
+## 5.4.1 Experiment PL1 — BM25 + Reranker Ensemble Sweep
+Hypothesis. The fine-tuned reranker, while strong at semantic ranking, might occasionally demote a lexically-relevant passage that BM25 ranked highly. An ensemble combining BM25's raw top-k picks with the reranker's top-1 pick could recover such cases and improve retrieval coverage.
+Setup. We fixed the reranker's top-1 evidence passage and supplemented it with BM25's top-k raw candidates (k = 1, 2, 3), producing evidence sets of size 2, 3, and 4 respectively. Each configuration was passed to the classifier and evaluated on the development set.
+Results.
+
+|Configuration | F | A | H_FA |
+| -------- | -------- | -------- | -------- |
+| BM25 top-1 + reranker top-1    | 0.181     | 0.506     | 0.26     |
+| BM25 top-2 + reranker top-1    | 0.173     | 0.506     | 0.258    |
+| BM25 top-3 + reranker top-1    | 0.166     | 0.500     | 0.249     |
+| Pure reranker top-3 (final system)    | 0.191     | 0.519     | 0.279     |
+Table 2: Ensemble sweep results on the development set. Pure reranker top-3 dominates across all metrics.
+Analysis. The ensemble consistently underperforms the pure reranker configuration across all metrics and all values of k. Moreover, performance degrades monotonically as more BM25 passages are added, suggesting that BM25's raw candidates are introducing noise rather than providing complementary signal. This result indicates that the fine-tuned reranker has already internalised the vocabulary-matching capability that the ensemble was intended to compensate for externally — domain fine-tuning made the ensemble redundant. This contrasts with Group 21's finding [CITE: Group 21 report], where an ensemble improved performance, likely because their reranker was trained from scratch without a pre-trained initialisation and therefore benefited from BM25's lexical signal.
+5.4.2 Experiment N1 — Confidence-Based Abstention Sweep
+Hypothesis. When the reranker assigns a low maximum confidence score to all 20 candidates for a given claim, it may indicate that none of the retrieved passages are genuinely relevant. In such cases, overriding the classifier with a NOT_ENOUGH_INFO label might be more accurate than trusting an unreliable classification.
+Setup. We introduced an abstention threshold τ. For any claim where the reranker's highest sigmoid score across all 20 candidates fell below τ, the system output NOT_ENOUGH_INFO regardless of the classifier's prediction. We swept τ ∈ {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7} and recorded H_FA, F, A, and the proportion of claims forced to NOT_ENOUGH_INFO (NEI rate).
+Results.
+τFAH_FANEI rate0.10.1910.4090.26061.7%0.20.1910.4160.26263.6%0.30.1910.4290.26464.9%0.40.1910.4090.26066.9%0.50.1910.4090.26066.9%0.60.1910.3830.25569.5%0.70.1910.3770.25370.1%Baseline (no abstention)0.1910.5200.2790%
+Table 3: Confidence-based abstention sweep on the development set. Baseline (no abstention) achieves the best H_FA at every threshold.
+Analysis. Abstention consistently hurts performance at every threshold tested. Two observations explain this result. First, the NEI rate is extremely high even at the lowest threshold (τ = 0.1 forces 61.7% of claims to NOT_ENOUGH_INFO), revealing that the reranker's raw sigmoid scores are not well-calibrated as absolute confidence values. The model was trained to rank 20 candidates relative to each other, not to produce scores that are meaningful in absolute terms — a low score does not reliably indicate that no relevant evidence exists. Second, accuracy degrades steadily as τ increases because the system incorrectly overrides correct classifier predictions for claims that did have good evidence but happened to receive low reranker scores. The retrieval F-score (F = 0.191) is unaffected across all rows, as abstention only changes the label, not the evidence set.
+
+
 
 
 ---
+
 # Reference
 
 [CITE: Reimers & Gurevych, 2019] — the sentence-transformers / cross-encoder paper
