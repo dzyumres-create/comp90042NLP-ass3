@@ -81,9 +81,7 @@ The pipeline applies the following steps in order:
 6. **POS-aware** lemmatisation. Each remaining token is part-of-speech tagged using NLTK's averaged perceptron tagger, and the tag is mapped to WordNet's four-category POS scheme (noun, verb, adjective, adverb). The WordNetLemmatizer then reduces each token to its base form using the correct POS context — for example, warming is correctly lemmatised to warm (verb) rather than warming (noun). This is an improvement over stemming, which can produce non-words, and over POS-agnostic lemmatisation, which defaults all tokens to the noun category and produces incorrect results for verbs and adjectives.
 ---
 
-## Output files (preprocessed, ready to load)
-
-All saved to the `preprocessed/` folder.
+## Output files
 
 | File | What it contains | Format | which parts load it |
 |---|---|---|---|
@@ -154,8 +152,51 @@ We also considered replacing BM25 with a dense retrieval model such as DPR [CITE
 
 ---
 
-## Classification 
+## 4. Experiments
 
+---
+
+## 4.1 Experimental Setup
+
+### 4.1.1 Dataset
+
+[TODO — Teammate A: insert dataset statistics here. Should include train/dev/test split sizes (1,228 / 154 / 153), class distribution per split, evidence corpus size (1,208,827), and mean evidences per claim.]
+
+### 4.1.2 BM25 Hyperparameters
+
+[TODO — Teammate A: insert final grid-searched k1 and b values, grid search range, and optimisation metric (recall).]
+
+### 4.1.3 Reranker Hyperparameters
+
+The reranker is based on `cross-encoder/ms-marco-MiniLM-L-6-v2`, fine-tuned on climate claim-evidence pairs constructed from the training set. Table X summarises the training configuration.
+
+| Hyperparameter | Value |
+| --- | --- |
+| Base model | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+| Training epochs | 3 |
+| Batch size | 16 |
+| Warmup proportion | 10% of total steps |
+| Max sequence length | 512 tokens |
+| Negative-to-positive ratio | 5:1 (hard negatives) |
+| Negative source | BM25 top-20 non-gold candidates |
+| Loss function | Binary cross-entropy (sigmoid output) |
+| BM25 candidates per claim | 20 |
+| Evidence passages selected after reranking | 3 |
+
+*Table X: Reranker training configuration.*
+
+All fine-tuning was conducted on a single GPU via Google Colab. Training pairs were constructed from `train-claims.json`, using gold evidence passages as positives and the remaining BM25 top-20 candidates as hard negatives, capped at a 5:1 negative-to-positive ratio per claim.
+
+### 4.1.4 Classifier Hyperparameters
+
+[TODO — Teammate B: insert classifier configuration here. Should include base model (bert-base-uncased), learning rate (2e-5), epochs, batch size (16), warmup ratio (10%), scheduler (cosine), and the custom [EVID_SEP] token details.]
+
+---
+
+Two small things to flag for your teammates:
+
+- The "Table X" caption number needs to be updated once the full report is assembled and all tables are numbered consistently.
+- Teammate B should confirm the exact GPU type used in Colab (e.g. T4, A100) for the hardware statement — worth one line in 4.1.3 and 4.1.4 each if they have it. 
 
 ---
 
