@@ -30,7 +30,13 @@ Please attach the pictures and tables to make content more vivid.
 
 6. Conclusion 
 7. Team Contributions 
-8. References 
+8. References
+
+---
+
+## 3. Approach
+
+---
 
 ## 3.1 data Analysis
 
