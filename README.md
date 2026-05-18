@@ -159,33 +159,7 @@ We also considered replacing BM25 with a dense retrieval model such as DPR [CITE
 
 ---
 
-## 5.3 Pipeline Improvement Analysis
-
-Figure 1 shows the full four-stage architecture of our system. Each stage builds on the previous, and the contribution of each component can be quantified by comparing performance before and after its introduction.
-
-***Stage 1 — Preprocessing establishes*** a consistent token vocabulary across claims and the 1,208,827-passage evidence corpus. By applying contraction expansion, lowercasing, stopword removal, and POS-aware lemmatisation, the pipeline reduces vocabulary mismatch that would otherwise penalise BM25 term overlap. The impact of this stage is embedded in all downstream scores and cannot be isolated without a controlled ablation, but it is a necessary foundation for the retrieval recall figures reported below.
-***Stage 2 — BM25 Retrieval*** achieves a recall of approximately 0.36 at top-20 on the development set. This is the ceiling that the reranker and classifier must work within — any gold evidence passage not retrieved at this stage is unrecoverable. The grid-searched hyperparameters (k1, b) were optimised specifically for recall rather than F-score, reflecting the asymmetric cost of missed evidence versus extra candidates.
-***Stage 3 — Cross-encoder Reranking*** is where the most significant improvement occurs. The off-the-shelf ms-marco reranker brought H_FA to 0.243. After fine-tuning on climate claim-evidence pairs, H_FA improved to 0.279 — a 15% relative gain. This confirms that domain adaptation is the primary driver of reranking quality, and that the vocabulary mismatch between web search pre-training and climate science text is large enough to be a measurable bottleneck.
-***Stage 4 — BERT Classification*** achieves a classification accuracy of A = 0.519 on the development set, with F = 0.191 (retrieval F-score is fixed by the reranker at this point). The key design choice here — training on reranker-predicted evidence rather than gold evidence — addresses the train/test distribution mismatch that would otherwise cause the classifier to overfit to clean, perfectly-retrieved inputs it will never see at inference time. The final H_FA of 0.279 represents the combined effect of all four stages working together.
-Figure 1: System architecture of the climate fact-checking pipeline. Metrics shown on the right reflect development set performance at each stage.
-
----
-
-I have all the numbers. Now on your question about tables — here's what works cleanly for both markdown and LaTeX:
-
-**The key rule:** Standard markdown pipe tables (`| col | col |`) render perfectly in markdown previews AND convert to LaTeX `tabular` with no ambiguity. The only things to avoid are merged cells or coloured rows — those need raw LaTeX. Since you're staying in markdown, I'll use clean pipe tables with bold on the best row, which renders fine in markdown and is easy to manually convert later.
-
-Here's the section:
-
----
-
-Good, I have the full picture of what's known and what's missing. Here's the complete section with all gaps clearly annotated for Teammate B to fill in:
-
----
-
-
-
-## Results
+## 5. Results
 
 ---
 
@@ -311,13 +285,13 @@ That's exactly ~150 words. One note: the last sentence references the oracle gap
 
 ---
 
-## Teammate Contribution
+## 7. Teammate Contribution
 
 ZhiyangDou is responsible for all the experiments, including the selection of initial rank and rerank models, tuning, and updating the progress of the experiments in real-time and where the difficulties are encountered.
 
 ---
 
-## Reference
+## 8. Reference
 
 [CITE: Reimers & Gurevych, 2019] — the sentence-transformers / cross-encoder paper
 [CITE: Nogueira & Cho, 2019] — ms-marco model
