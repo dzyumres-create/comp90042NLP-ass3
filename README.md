@@ -13,7 +13,7 @@ Please attach the pictures and tables to make content more vivid.
 3.2 Preprocessing — lemmatisation, why it matters for BM25
 3.3 Evidence Retrieval — BM25, grid search, why recall over F1 , hyper parameter tradeoff
 3.4 Evidence Reranking — cross-encoder, domain mismatch, fine-tuning rationale 
-3.5 Claim Classification — BERT, [EVID_SEP], noise training C1, class weights C2 
+3.5 Claim Classification — BERT, [EVID_SEP], concatenation vs separate encoding
 3.6 Alternative approaches considered — bi-encoder considered and rejected, why 
 
 4. Experiments
@@ -27,6 +27,7 @@ Please attach the pictures and tables to make content more vivid.
 5.2 Retrieval analysis — BM25 recall at different top-k 
 5.3 Pipeline improvement analysis — what each component added 
 5.4 Novelty experiments — PL1 ensemble sweep table + N1 abstention table + analysis of why both failed 
+5.5 Classifier comparison — four configurations, claim accuracy (A) on dev
 
 6. Conclusion 
 7. Team Contributions 
@@ -149,6 +150,67 @@ The value of fine-tuning is further demonstrated by the negative result from our
 
 ---
 
+## 3.5 Claim Classification
+
+Claim classification is the final stage of the pipeline. After retrieval and reranking (or retrieval alone), the model receives the claim text together with the raw text of the selected evidence passages and predicts one of four labels: SUPPORTS, REFUTES, NOT_ENOUGH_INFO, or DISPUTED. The classifier does not retrieve or re-rank evidence; it consumes the evidence set produced upstream and outputs a claim-level label.
+
+### 3.5.1 Task Definition
+
+For each claim, the input consists of the claim text and one or more evidence passages (resolved from evidence IDs in the corpus). The target is the four-way claim label assigned in the training set.
+
+### 3.5.2 Architecture A: Evidence Concatenation
+
+Multiple evidence passages are joined with a custom separator `[EVID_SEP]` into a single text segment, which is paired with the claim in one input sequence:
+
+`[CLS] claim [SEP] evidence_1 [EVID_SEP] evidence_2 [EVID_SEP] …`
+
+A classification head is added on top of the pretrained BERT encoder; the `[CLS]` representation is mapped to four classes. The maximum sequence length is 512 tokens. When truncation is required, the claim side is preserved and the evidence segment is truncated (`truncation="only_second"`). Under the gold-evidence setting, each claim is paired with roughly three to four evidence passages on average; the concatenated sequence typically remains within the length limit, so truncation is rarely observed in practice.
+
+This design places the claim and all evidence in a single self-attention context, enabling joint modelling of semantic relations across passages. It is straightforward to implement and well suited when the number of evidence passages per claim is small.
+
+### 3.5.3 Architecture B: Per-Evidence Encoding with Max Pooling
+
+Each evidence passage is encoded separately in a claim–evidence pair:
+
+`[CLS] claim [SEP] evidence_i`
+
+Each pair is passed through BERT independently; the `[CLS]` vector is projected to a 128-dimensional representation (with GELU activation and dropout). For each claim, at most \(K\) evidence slots are reserved (\(K = 5\) under gold evidence; \(K = 15\) for the BM25-based configuration). When fewer than \(K\) passages are present, the remaining slots are filled with empty text; a binary mask excludes these padded slots so that only vectors for real evidence participate in aggregation.
+
+Claim-level representation is obtained by max pooling over the per-evidence vectors: for each dimension, the maximum value across evidence vectors is taken. A classification head then outputs the four-class logits.
+
+Max pooling is motivated by the structure of the labelling task. The correct claim label should reflect whether at least one evidence passage bears the decisive semantic relation to the claim, rather than an average over all passages. For example, if a claim is SUPPORTS, a single passage that clearly supports the claim should suffice even when many other passages are irrelevant; mean pooling would be diluted by unrelated text, whereas max pooling retains the strongest per-dimension signal among evidence vectors. The trade-off is that cross-evidence interaction within a single forward pass is not modelled, and each claim–evidence pair requires its own encoding up to 512 tokens.
+
+Compared with Architecture A, Architecture B exchanges additional forward passes for full-length encoding of each evidence passage without concatenation-induced truncation.
+
+### 3.5.4 Training Configurations
+
+Initial experiments train and evaluate on gold evidence to compare the two encoding schemes under ideal inputs and to establish classification baselines. In the deployed pipeline, inference uses evidence from retrieval and reranking rather than gold lists; training on gold evidence while testing on predicted evidence introduces a distribution shift between training and deployment. Pipeline experiments therefore use upstream evidence during both training and evaluation (three passages after reranking, or fifteen from BM25). Gold-evidence runs are retained to separate the effect of encoding architecture from the effect of evidence source.
+
+Table X summarises the configurations. The evidence source column indicates which passages are used for training and for the primary development-set evaluation in each setting.
+
+| Configuration | Encoding | Evidence source | Max. evidence per claim |
+| --- | --- | --- | --- |
+| Gold + concatenation | A | Gold (train/dev) | Gold count (mean ≈ 3.4) |
+| Gold + separate | B | Gold (train/dev) | 5 |
+| Pipeline + concatenation (final classifier) | A | Reranker top-3 | 3 |
+| BM25 + separate (ablation) | B | BM25 top-15 (no reranking) | 15 |
+
+The pipeline configuration matches the submitted system. The BM25 ablation tests whether more passages without reranking, combined with per-evidence encoding and max pooling, can outperform a smaller set of semantically reranked passages; outcomes are reported in Section 5.
+
+### 3.5.5 Design Evolution
+
+**Gold + concatenation.** We first adopted evidence concatenation with a BERT classification head on gold evidence to verify that four-way claim classification is feasible. Under gold evidence, sequence length is usually sufficient and truncation is uncommon.
+
+**Gold + separate.** To mitigate length pressure when many or long evidence passages must be considered, we introduced per-evidence encoding with max pooling. On gold inputs, performance is close to but slightly below the concatenation baseline, indicating that changing the aggregation scheme alone does not yield a consistent gain.
+
+**Pipeline + concatenation.** The upstream reranker outputs three evidence passages per claim, a count that remains compatible with concatenation. Training and inference both use reranker output as evidence to align with deployment. This configuration is the classification module of the final system.
+
+**BM25 + separate.** We further asked whether supplying more evidence might recover relevant passages missed at retrieval, on the assumption that additional passages are often irrelevant and should not dominate the prediction. Because BM25 returns up to fifteen passages without reranking, we use Architecture B to avoid overly long concatenated sequences. This setting serves as a controlled comparison against the pipeline configuration; results are discussed in Section 5.
+
+**Summary.** The final system uses evidence concatenation with three reranker-selected passages and pipeline-aligned evidence during training. Gold-evidence runs compare encoding architectures; the BM25 multi-evidence setting tests whether larger, noisier evidence sets outperform a smaller reranked set.
+
+---
+
 ## 3.6 Alternative Approaches Considered
 
 ### 3.6.1 Bi-Encoder for Reranking
@@ -195,14 +257,57 @@ All fine-tuning was conducted on a single GPU via Google Colab. Training pairs w
 
 ### 4.1.4 Classifier Hyperparameters
 
-[TODO — Teammate B: insert classifier configuration here. Should include base model (bert-base-uncased), learning rate (2e-5), epochs, batch size (16), warmup ratio (10%), scheduler (cosine), and the custom [EVID_SEP] token details.]
+The claim classifier is trained on top of `bert-base-uncased` to predict one of four claim labels. All runs use the Hugging Face `Trainer`; hyperparameter values are listed below. The four training configurations (evidence source and encoding) match Section 3.5.4; this section records implementation and training details only.
+
+**Shared training settings.** The following hyperparameters are common to all classification experiments.
+
+| Hyperparameter | Value |
+| --- | --- |
+| Pretrained encoder | `bert-base-uncased` |
+| Number of classes | 4 |
+| Optimizer | AdamW |
+| Learning rate | 2×10⁻⁵ |
+| Weight decay | 0.01 |
+| Training epochs | 4 |
+| LR scheduler | cosine |
+| Warmup | 10% of total steps |
+| Max sequence length | 512 tokens |
+| Truncation | `only_second` (claim preserved; evidence truncated) |
+| Random seed | 42 |
+| Evaluation and checkpointing | Each epoch |
+| Loss | Cross-entropy |
+
+*Table Y: Shared classifier training hyperparameters.*
+
+**Architecture-specific settings.** The two encoding schemes differ in batch size, cap on evidence count, and classification head; all other settings follow Table Y.
+
+| Item | Architecture A (concatenation) | Architecture B (per-evidence + max pooling) |
+| --- | --- | --- |
+| Evidence representation | Multiple passages joined with `[EVID_SEP]` | Each passage encoded in a separate claim–evidence pair |
+| Classification head | Standard head on `[CLS]` | `[CLS]` projected to 128 dimensions (GELU, dropout 0.1), max pooling over up to \(K\) evidence vectors, then two-layer MLP (128→128→4) |
+| Train batch size (per device) | 8 | 4 |
+| Eval batch size (per device) | 8 | 4 |
+
+*Table Z: Architecture-specific classifier settings.*
+
+**Four experimental configurations.**
+
+| Configuration | Encoding | Evidence for training and primary dev evaluation | Max. evidence per claim (\(K\)) |
+| --- | --- | --- | --- |
+| Gold + concatenation | A | Gold (train/dev) | Gold count (mean ≈ 3.4) |
+| Gold + separate | B | Gold (train/dev) | 5 |
+| Pipeline + concatenation (final classifier) | A | Reranker top-3 | 3 |
+| BM25 + separate (ablation) | B | BM25 top-15 (no reranking) | 15 |
+
+*Table W: Classifier configurations aligned with Section 3.5.4.*
+
+Training uses all claims in the training split (1,228 instances; see Section 4.1.1). Each instance consists of the claim text, evidence passages for that configuration, and a four-way label. For pipeline and BM25 configurations, evidence comes from upstream reranker or BM25 output respectively. Development-set results use the same evidence source as in the table above; metric definitions are given in Section 4.2.
 
 ---
 
 Two small things to flag for your teammates:
 
 - The "Table X" caption number needs to be updated once the full report is assembled and all tables are numbered consistently.
-- Teammate B should confirm the exact GPU type used in Colab (e.g. T4, A100) for the hardware statement — worth one line in 4.1.3 and 4.1.4 each if they have it. 
 
 ---
 
@@ -226,6 +331,27 @@ Table 1 presents the full ablation of our system, showing the incremental contri
 *Table 1: Ablation results on the development set. Each row adds one component over the previous. [TODO] entries must be filled by running eval.py before submission.*
 
 Each component contributes meaningfully to the final score. The off-the-shelf reranker lifts H_FA from a BM25-only baseline to 0.243 by replacing keyword-matched candidates with semantically re-ranked ones. Domain fine-tuning of the reranker then produces a further gain to H_FA = 0.279, confirming that the vocabulary mismatch between the ms-marco pre-training distribution and climate science text is a measurable bottleneck. The noise-trained classifier (C1), trained on reranker-predicted rather than gold evidence, addresses the train/test distribution mismatch and contributes to the final accuracy of A = 0.519. The oracle row — running the classifier on ground-truth gold evidence — establishes the accuracy ceiling achievable if retrieval were perfect, and quantifies the remaining cost of imperfect evidence retrieval.
+
+---
+
+## 5.5 Classifier Comparison
+
+This section compares the four classification configurations described in Sections 3.5.4 and 4.1.4 on the development set, reporting claim classification accuracy (A) as defined in Section 4.2. For each configuration, evaluation uses the same evidence source as in training.
+
+| Configuration | Evidence at evaluation | A |
+| --- | --- | --- |
+| Gold + concatenation | Gold | 0.422 |
+| Gold + separate | Gold | 0.410 |
+| Pipeline + concatenation (final classifier) | Reranker top-3 | 0.519 |
+| BM25 + separate (ablation) | BM25 top-15 | 0.468 |
+
+*Table 2: Claim classification accuracy (A) on the development set for four classifier configurations.*
+
+**Gold + concatenation vs Gold + separate.** Under gold evidence, concatenation slightly outperforms the separate encoding (0.422 vs 0.410). The margin is small. When the evidence set is given and the input distribution is matched, placing all passages in one sequence so the claim can attend to every passage jointly works marginally better than encoding each claim–evidence pair separately and aggregating with max pooling. This aligns with the observation in Section 3.5.5 that changing the aggregation scheme alone does not yield a large or reliable gain.
+
+**Pipeline + concatenation.** This configuration achieves the highest A (0.519) and is the classifier used in the submitted system. Both training and inference use the three passages returned by the reranker — the same text the full pipeline presents after retrieval and reranking. The classifier therefore learns to decide labels from evidence that has passed upstream selection, rather than from the ideal gold passages alone; the phrasing and choice of passages reflect what earlier stages produce. Aligning training with this deployment input helps the model adapt to the evidence the pipeline actually supplies, which yields the best development accuracy. This matches the classifier contribution in the final row of Table 1.
+
+**BM25 + separate.** With up to fifteen BM25 passages per claim and no reranking, A is 0.468. This is higher than both gold configurations but lower than Pipeline + concatenation. Relative to the gold experiments, training and evaluating on a larger set of lexically retrieved passages improves accuracy, which suggests that gold-only runs are useful for comparing encodings but do not directly reflect how the classifier behaves on realistic pipeline inputs. Relative to the final configuration, the absence of reranking leaves more noise in the evidence set; per-evidence encoding and max pooling do not close the gap to 0.519. Supplying more passages at classification time therefore does not replace the reranker’s filtering. This is consistent with Section 5.4, where adding raw BM25 passages to the reranker’s output did not improve the full system.
 
 ---
 
