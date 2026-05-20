@@ -581,4 +581,5 @@ Shaogang Gao is responsible for the BM25 evidence retrieval component, including
 [CITE: Nguyen et al., 2016] — the Microsoft MARCO dataset itself
 
 Robertson, S., & Zaragoza, H. (2009). The probabilistic relevance framework: BM25 and beyond (Vol. 4). Now Publishers Inc.
+
 Robertson, S. E., Walker, S., Jones, S., Hancock-Beaulieu, M. M., & Gatford, M. (1994). Okapi at TREC.
