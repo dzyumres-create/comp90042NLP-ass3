@@ -124,6 +124,68 @@ with open('preprocessed/train_clean.json', 'r') as f:
 
 # train_clean['claim-2967']['clean_tokens'] → ['south', 'australia', 'expens', ...]
 ```
+## 3.3 Evidence Retrieval
+
+### 3.3.1 BM25 as the First-Stage Candidate Generator
+
+Our system uses a two-stage evidence retrieval pipeline. The first stage applies BM25 to retrieve a small set of candidate passages from the full evidence corpus of 1,208,827 passages. The second stage then applies a transformer-based cross-encoder reranker to re-score these candidates and select the final evidence passages used by the classifier.
+
+BM25 provides an efficient first-stage filter that reduces the search space while still preserving a reasonable number of potentially relevant passages for the downstream reranker.
+
+The BM25 input is produced by the shared preprocessing pipeline described in Section 3.2. Both claims and evidence passages are processed using contraction expansion, lowercasing, punctuation and special-character removal, tokenisation, stopword removal, and POS-aware lemmatisation. This is particularly important for BM25 because it relies on sparse lexical overlap: inconsistent surface forms, such as plural forms, verb inflections, or case differences, can otherwise prevent a relevant claim-evidence match from receiving a high score.
+
+BM25 scores each evidence passage \(d\) for a claim query \(q\) using the following form:
+
+```text
+score(q, d) = sum_{t in q} IDF(t) * f(t, d)(k1 + 1)
+              / (f(t, d) + k1 * (1 - b + b * |d| / avgdl))
+```
+
+Here, \(k_1\) controls term-frequency saturation and \(b\) controls document-length normalisation.
+
+### 3.3.2 Grid Search and Final BM25 Setting
+
+BM25 hyperparameters were tuned on the development set only. The test set was not used for tuning or manual inspection, following the project rules. We searched:
+
+| Hyperparameter | Values searched |
+|---|---|
+| `k1` | {0.5, 0.8, 1.2, 1.5} |
+| `b` | {0.6, 0.75, 0.85, 0.9} |
+| `top-k` | {10, 15, 20} |
+
+For each configuration, BM25 generated evidence predictions for the development claims. We then computed per-claim precision, recall, and F-score against the gold evidence IDs and averaged them across claims.
+
+| Configuration | `k1` | `b` | `top-k` | Precision | Recall | F-score |
+|---|---:|---:|---:|---:|---:|---|
+| Best standalone F-score | 0.5 | 0.75 | 10 | 0.0799 | 0.2844 | 0.1184 |
+| Larger candidate pool | 0.5 | 0.60 | 15 | 0.0641 | 0.3259 | 0.1029 |
+| Highest recall | 0.5 | 0.60 | 20 | 0.0516 | 0.3570 | 0.0873 |
+
+The best standalone BM25 configuration was `top-k = 10`, `k1 = 0.5`, and `b = 0.75`, with an evidence retrieval F-score of 0.1184. This was selected as the final BM25 setting. The result suggests that lower term-frequency saturation was beneficial: repeatedly matching the same keyword was not always a reliable relevance signal, because many climate passages share broad vocabulary while differing in factual relevance.
+
+### 3.3.3 Why We Optimised F-score Rather Than Recall Alone
+
+At first glance, because BM25 is a candidate generator, it may seem preferable to optimise recall alone. The intuition is valid: if a gold evidence passage is not retrieved by BM25, neither the reranker nor the classifier can recover it later. This makes recall an important diagnostic for the first retrieval stage.
+
+However, recall alone was not the best selection criterion for our final pipeline. The top-20 configuration achieved higher recall than top-10, increasing recall from 0.2844 to 0.3570, but this came with a substantial precision drop from 0.0799 to 0.0516 and a lower F-score of 0.0873. In practice, this means that the larger candidate pool contains many more lexical false positives: passages that share surface words with the claim but do not provide the correct evidence.
+
+This matters because the downstream transformer is a reranker, not an oracle. It can model semantic interactions between a claim and each candidate passage, but it still has to choose from the noisy candidate pool supplied by BM25. If the pool contains too many irrelevant but lexically similar passages, the reranker’s task becomes harder, and the classifier may receive misleading evidence. Since the final system is evaluated jointly on retrieval and classification, excessive candidate noise can harm the end-to-end harmonic mean \(H_{FA}\).
+
+For this reason, we selected the configuration with the highest BM25 F-score rather than the configuration with the highest recall. This choice reflects a deliberate precision-recall trade-off: the final BM25 setting still retrieves enough candidates for the reranker to improve evidence selection, while avoiding the larger noise penalty introduced by top-20 retrieval.
+
+### 3.3.4 Final BM25 Operating Point
+
+The final BM25 setting used in the pipeline is:
+
+| Component | Final value |
+|---|---|
+| BM25 implementation | `rank_bm25.BM25Okapi` |
+| Candidate count | `top-k = 10` |
+| `k1` | 0.5 |
+| `b` | 0.75 |
+| Development F-score | 0.1184 |
+
+This setting is used to generate the candidate evidence passages passed to the cross-encoder reranker.
 
 ## 3.4 Evidence Reranking
 
@@ -228,11 +290,39 @@ We also considered replacing BM25 with a dense retrieval model such as DPR [CITE
 
 ### 4.1.1 Dataset
 
-[TODO — Teammate A: insert dataset statistics here. Should include train/dev/test split sizes (1,228 / 154 / 153), class distribution per split, evidence corpus size (1,208,827), and mean evidences per claim.]
+All experiments used only the datasets provided for the assignment. The training set was used to train the reranker and classifier; the development set was used for hyperparameter tuning, ablation studies, and retrieval analysis; and the unlabelled test set was used only for final prediction. We did not manually inspect the test set or use any external training data.
+
+| Statistic | Value | Notes |
+|---|---:|---|
+| Train claims | 1,228 | Labelled claims with gold evidence IDs |
+| Dev claims | 154 | Used for tuning and analysis |
+| Test claims | 153 | Unlabelled; used only for final prediction |
+| Evidence passages | 1,208,827 | Full retrieval corpus |
+| Mean claim length | 20.1 words | Computed during preprocessing |
+| Mean gold evidences per claim | 3.4 | Shows that claims often require multiple evidence passages |
+
+The label distribution is imbalanced, with `SUPPORTS` as the largest class and `DISPUTED` as the smallest.
+
+| Label | Train distribution | Dev distribution |
+|---|---:|---:|
+| SUPPORTS | 42.2% | 44.2% |
+| REFUTES | 16.2% | 17.5% |
+| NOT_ENOUGH_INFO | 31.4% | 26.6% |
+| DISPUTED | 10.1% | 11.7% |
+
 
 ### 4.1.2 BM25 Hyperparameters
 
-[TODO — Teammate A: insert final grid-searched k1 and b values, grid search range, and optimisation metric (recall).]
+| Hyperparameter | Value |
+|---|---|
+| Implementation | `rank_bm25.BM25Okapi` |
+| Corpus input | `evidence_clean.json` token lists |
+| Query input | `clean_tokens` from `train_clean.json`, `dev_clean.json`, and `test_clean.json` |
+| Grid search `k1` | {0.5, 0.8, 1.2, 1.5} |
+| Grid search `b` | {0.6, 0.75, 0.85, 0.9} |
+| Grid search `top-k` | {10, 15, 20} |
+| Final setting | `top-k = 10`, `k1 = 0.5`, `b = 0.75` |
+| Selection criterion | Highest development-set BM25 F-score |
 
 ### 4.1.3 Reranker Hyperparameters
 
@@ -331,6 +421,24 @@ Table 1 presents the full ablation of our system, showing the incremental contri
 *Table 1: Ablation results on the development set. Each row adds one component over the previous. [TODO] entries must be filled by running eval.py before submission.*
 
 Each component contributes meaningfully to the final score. The off-the-shelf reranker lifts H_FA from a BM25-only baseline to 0.243 by replacing keyword-matched candidates with semantically re-ranked ones. Domain fine-tuning of the reranker then produces a further gain to H_FA = 0.279, confirming that the vocabulary mismatch between the ms-marco pre-training distribution and climate science text is a measurable bottleneck. The noise-trained classifier (C1), trained on reranker-predicted rather than gold evidence, addresses the train/test distribution mismatch and contributes to the final accuracy of A = 0.519. The oracle row — running the classifier on ground-truth gold evidence — establishes the accuracy ceiling achievable if retrieval were perfect, and quantifies the remaining cost of imperfect evidence retrieval.
+
+## 5.2 Retrieval Analysis
+
+The BM25 top-k analysis shows the expected trade-off between recall and precision. Increasing `top-k` retrieves more gold evidence passages, but it also introduces more non-gold passages into the candidate set.
+
+| Top-k | Best `k1` | Best `b` | Precision | Recall | F-score | Interpretation |
+|---:|---:|---:|---:|---:|---:|---|
+| 10 | 0.5 | 0.75 | 0.0799 | 0.2844 | 0.1184 | Highest F-score; final BM25 setting |
+| 15 | 0.5 | 0.60 | 0.0641 | 0.3259 | 0.1029 | Higher recall but more noise |
+| 20 | 0.5 | 0.60 | 0.0516 | 0.3570 | 0.0873 | Highest recall but more noise |
+
+Moving from top-10 to top-20 increases recall from 0.2844 to 0.3570, a relative gain of approximately 25.5%. However, this comes at the cost of a much lower precision and a lower F-score. Since each claim has only 3.4 gold evidence passages on average, expanding the candidate set to 20 passages inevitably adds many incorrect candidates.
+
+BM25 top-10 provides a cleaner candidate pool for the cross-encoder reranker. The reranker can then focus on semantically distinguishing a smaller set of plausible candidates, rather than filtering through a larger number of lexical false positives.
+
+The final pipeline achieves development-set retrieval F = 0.191, classification accuracy A = 0.519, and \(H_{FA} = 0.279\). This improvement over standalone BM25 indicates that the reranker adds substantial value, but the quality of the BM25 candidate pool still matters. A larger BM25 pool is not automatically better if it lowers the average quality of the candidates passed downstream.
+
+This interpretation is also supported by our BM25-reranker ensemble experiment. Adding raw BM25 top-k passages directly to the reranker output reduced performance rather than improving it. This suggests that unfiltered BM25 candidates can introduce noise into the final evidence set, even when they improve first-stage recall.
 
 ---
 
@@ -461,6 +569,8 @@ That's exactly ~150 words. One note: the last sentence references the oracle gap
 ## 7. Teammate Contribution
 
 ZhiyangDou is responsible for all the experiments, including the selection of initial rank and rerank models, tuning, and updating the progress of the experiments in real-time and where the difficulties are encountered.
+
+Shaogang Gao is responsible for the BM25 evidence retrieval component, including BM25 implementation, hyperparameter tuning, final parameter selection, and analysis of the precision, recall, and F-score trade-offs.
 
 ---
 
