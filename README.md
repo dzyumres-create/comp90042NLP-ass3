@@ -130,18 +130,18 @@ with open('preprocessed/train_clean.json', 'r') as f:
 
 Our system uses a two-stage evidence retrieval pipeline. The first stage applies BM25 to retrieve a small set of candidate passages from the full evidence corpus of 1,208,827 passages. The second stage then applies a transformer-based cross-encoder reranker to re-score these candidates and select the final evidence passages used by the classifier.
 
-BM25 provides an efficient first-stage filter that reduces the search space while still preserving a reasonable number of potentially relevant passages for the downstream reranker.
+BM25 provides an efficient first-stage filter that reduces the search space while still preserving a reasonable number of potentially relevant passages for the downstream reranker.[@robertson1994okapi]
 
 The BM25 input is produced by the shared preprocessing pipeline described in Section 3.2. Both claims and evidence passages are processed using contraction expansion, lowercasing, punctuation and special-character removal, tokenisation, stopword removal, and POS-aware lemmatisation. This is particularly important for BM25 because it relies on sparse lexical overlap: inconsistent surface forms, such as plural forms, verb inflections, or case differences, can otherwise prevent a relevant claim-evidence match from receiving a high score.
 
-BM25 scores each evidence passage \(d\) for a claim query \(q\) using the following form:
+BM25 scores each evidence passage \(d\) for a claim query \(q\) using the following form:[@robertson2009probabilistic]
 
 ```text
 score(q, d) = sum_{t in q} IDF(t) * f(t, d)(k1 + 1)
               / (f(t, d) + k1 * (1 - b + b * |d| / avgdl))
 ```
 
-Here, \(k_1\) controls term-frequency saturation and \(b\) controls document-length normalisation.
+Here, \(k_1\) controls term-frequency saturation and \(b\) controls document-length normalisation.[@robertson2009probabilistic]
 
 ### 3.3.2 Grid Search and Final BM25 Setting
 
@@ -580,4 +580,5 @@ Shaogang Gao is responsible for the BM25 evidence retrieval component, including
 [CITE: Nogueira & Cho, 2019] — ms-marco model
 [CITE: Nguyen et al., 2016] — the Microsoft MARCO dataset itself
 
-   
+Robertson, S., & Zaragoza, H. (2009). The probabilistic relevance framework: BM25 and beyond (Vol. 4). Now Publishers Inc.
+Robertson, S. E., Walker, S., Jones, S., Hancock-Beaulieu, M. M., & Gatford, M. (1994). Okapi at TREC.
